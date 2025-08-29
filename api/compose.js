@@ -3,7 +3,7 @@ const sharp = require('sharp');
 
 export default async function handler(req, res) {
   try {
-    const { left, center, right, bg } = req.query;
+    const { left, center, right, bg, active } = req.query;
     
     const width = 1440;
     const height = 960;
