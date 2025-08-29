@@ -102,19 +102,19 @@ export default async function handler(req, res) {
       }
     }
     
-    // 3. 정보 라벨 추가 (디버깅용 - 일시적으로 복구)
+    // 3. 정보 라벨 추가 (영어 디버깅용)
     const activeChars = [left, center, right].filter(x => x && x !== 'none');
     if (activeChars.length > 0 || bg || active) {
-      const debugInfo = `Active: ${active || 'none'} | Chars: ${activeChars.join(', ')} | BG: ${bg || 'none'}`;
+      const debugInfo = `ACTIVE: ${active || 'NONE'} | CHARS: ${activeChars.length} | BG: ${bg || 'NONE'}`;
       
       const label = Buffer.from(`
-        <svg width="500" height="60">
-          <rect width="500" height="60" fill="rgba(0,0,0,0.8)" rx="5"/>
-          <text x="10" y="20" font-size="14" fill="white">
-            🎭 ${debugInfo}
+        <svg width="600" height="50">
+          <rect width="600" height="50" fill="black" stroke="white" stroke-width="2"/>
+          <text x="10" y="20" font-family="monospace" font-size="16" fill="white">
+            DEBUG: ${debugInfo}
           </text>
-          <text x="10" y="40" font-size="12" fill="yellow">
-            Dark processing: ${active ? `Non-active should be dark` : 'All bright (no active set)'}
+          <text x="10" y="40" font-family="monospace" font-size="14" fill="yellow">
+            DARK MODE: ${active ? 'ON - Non-active chars should be dark' : 'OFF - All chars normal'}
           </text>
         </svg>
       `);
