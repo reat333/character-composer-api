@@ -102,18 +102,29 @@ export default async function handler(req, res) {
       }
     }
     
-    // 3. 정보 라벨 제거됨! (이 부분을 주석처리)
-    /*
+    // 3. 정보 라벨 추가 (디버깅용 - 일시적으로 복구)
     const activeChars = [left, center, right].filter(x => x && x !== 'none');
-    if (activeChars.length > 0 || bg) {
-      const label = Buffer.from(`...`);
+    if (activeChars.length > 0 || bg || active) {
+      const debugInfo = `Active: ${active || 'none'} | Chars: ${activeChars.join(', ')} | BG: ${bg || 'none'}`;
+      
+      const label = Buffer.from(`
+        <svg width="500" height="60">
+          <rect width="500" height="60" fill="rgba(0,0,0,0.8)" rx="5"/>
+          <text x="10" y="20" font-size="14" fill="white">
+            🎭 ${debugInfo}
+          </text>
+          <text x="10" y="40" font-size="12" fill="yellow">
+            Dark processing: ${active ? `Non-active should be dark` : 'All bright (no active set)'}
+          </text>
+        </svg>
+      `);
+      
       overlays.push({
         input: label,
         left: 10,
         top: 10
       });
     }
-    */
     
     // 4. 최종 합성
     let finalImage = baseImage;
