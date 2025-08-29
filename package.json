@@ -1,15 +1,7 @@
-// 1. 배경 로드 → 600x400 리사이즈  
-baseImage = sharp(bgBuffer).resize(600, 400)
-
-// 2. 캐릭터들 로드 → 각각 크기 조절
-resizedChar = sharp(charBuffer).resize({height: 250})
-
-// 3. 픽셀 단위 합성 
-finalImage = baseImage.composite([
-  { input: char1Buffer, left: 50, top: 100 },   // 왼쪽
-  { input: char2Buffer, left: 250, top: 100 },  // 가운데  
-  { input: char3Buffer, left: 450, top: 100 }   // 오른쪽
-])
-
-// 4. PNG 출력
-resultBuffer = finalImage.png().toBuffer()
+{
+  "name": "character-composer",
+  "version": "1.0.0",
+  "dependencies": {
+    "sharp": "^0.33.2"
+  }
+}
