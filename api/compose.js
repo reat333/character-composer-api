@@ -102,33 +102,7 @@ export default async function handler(req, res) {
       }
     }
     
-    // 3. 색상 블록으로 디버그 정보 표시 (텍스트 없음)
-    const activeChars = [left, center, right].filter(x => x && x !== 'none');
-    if (activeChars.length > 0 || bg || active) {
-      // active 파라미터 상태를 색상으로 표시
-      let statusColor = 'gray';  // 기본: 회색 (active 없음)
-      
-      if (active === 'left') statusColor = 'red';      // 왼쪽 활성화: 빨강
-      if (active === 'center') statusColor = 'green';  // 가운데 활성화: 초록  
-      if (active === 'right') statusColor = 'blue';    // 오른쪽 활성화: 파랑
-      
-      const debugBlock = Buffer.from(`
-        <svg width="200" height="50">
-          <rect width="200" height="50" fill="black" stroke="white" stroke-width="3"/>
-          <rect x="10" y="10" width="30" height="30" fill="${statusColor}" stroke="white" stroke-width="2"/>
-          <rect x="50" y="10" width="20" height="30" fill="${left ? 'lightgreen' : 'darkred'}"/>
-          <rect x="80" y="10" width="20" height="30" fill="${center ? 'lightgreen' : 'darkred'}"/>  
-          <rect x="110" y="10" width="20" height="30" fill="${right ? 'lightgreen' : 'darkred'}"/>
-          <rect x="140" y="10" width="50" height="30" fill="${bg ? 'orange' : 'purple'}"/>
-        </svg>
-      `);
-      
-      overlays.push({
-        input: debugBlock,
-        left: 10,
-        top: 10
-      });
-    }
+    // 3. 디버그 정보 제거 (이제 파일명 방식 사용)
     
     // 4. 최종 합성
     let finalImage = baseImage;
