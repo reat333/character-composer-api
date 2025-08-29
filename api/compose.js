@@ -54,11 +54,11 @@ export default async function handler(req, res) {
       });
     }
     
-    // 2. 캐릭터들 로드 및 배치 (1440x960 기준)
+    // 2. 캐릭터들 로드 및 배치 (화면 안쪽으로 조정)
     const positions = {
-      left: { x: 240, y: height - 120 },    // 왼쪽 하단
+      left: { x: 360, y: height - 120 },    // 왼쪽 (더 중앙으로)
       center: { x: 720, y: height - 120 },  // 가운데 하단  
-      right: { x: 1200, y: height - 120 }   // 오른쪽 하단
+      right: { x: 1080, y: height - 120 }   // 오른쪽 (더 중앙으로)
     };
     
     const overlays = [];
