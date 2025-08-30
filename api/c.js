@@ -169,7 +169,8 @@ export default async function handler(req, res) {
             let charProcessor = sharp(Buffer.from(charBuffer))
               .resize({ height: 740, withoutEnlargement: true, fit: 'contain' });
             
-            // 캐릭터 키에 따른 하단 크롭
+            // 캐릭터 키에 따른 하단 크롭 (일시 비활성화 - 테스트용)
+            /*
             const heightAdjustment = getHeightAdjustment(charName);
             if (heightAdjustment > 0) {
               const metadata = await charProcessor.metadata();
@@ -180,6 +181,7 @@ export default async function handler(req, res) {
                 height: Math.max(1, metadata.height - heightAdjustment)
               });
             }
+            */
             
             // 활성화 상태에 따른 어둡게 처리
             const isActive = active === pos;
