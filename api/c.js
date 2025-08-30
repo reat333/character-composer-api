@@ -10,7 +10,7 @@ const CHARACTER_CODES = {
 
 // 캐릭터별 키(height) 고정 정의
 const CHARACTER_HEIGHTS = {
-    'a': 'l', // girlA
+    'a': 's', // girlA
     'b': 'm', // girlB
     'c': 'l'  // girlC
 };
@@ -230,4 +230,5 @@ export default async function handler(req, res) {
     res.status(500).send(errorBuffer);
   }
 }
+
 
