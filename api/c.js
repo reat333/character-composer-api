@@ -97,7 +97,7 @@ function decodeCharacter(charCode) {
 }
 
 function decodeParams(paramString) {
-  if (!paramString) return { layout: 'three_person' }; // 기본값
+  if (!paramString) return { layout: 'three_person' };
   
   const parts = paramString.split('.');
   
@@ -105,28 +105,66 @@ function decodeParams(paramString) {
   const lastPart = parts[parts.length - 1];
   const layout = LAYOUT_CODES[lastPart] || 'three_person';
   
-  if (layout === 'two_person') {
-    // 2인 구도: left.right.bg.active.2
-    const [leftCode, rightCode, bgCode, activeCode, layoutCode] = parts;
-    return {
-      left: decodeCharacter(leftCode),
-      center: null,
-      right: decodeCharacter(rightCode),
-      bg: BACKGROUND_CODES[bgCode] || null,
-      active: POSITION_CODES[activeCode] || null,
-      layout: layout
-    };
-  } else {
-    // 3인 구도: left.center.right.bg.active.3
-    const [leftCode, centerCode, rightCode, bgCode, activeCode, layoutCode] = parts;
-    return {
-      left: decodeCharacter(leftCode),
-      center: decodeCharacter(centerCode),
-      right: decodeCharacter(rightCode),
-      bg: BACKGROUND_CODES[bgCode] || null,
-      active: POSITION_CODES[activeCode] || null,
-      layout: layout
-    };
+  try {
+    if (layout === 'two_person') {
+      // 2인 구도: left.right.bg.active.2 (최소 5개 필요)
+      if (parts.length < 5) {
+        console.log('2인 구도 파라미터 부족:', parts.length);
+        return { layout: 'three_person' }; // 기본값으로 폴백
+      }
+      
+      const leftCode = parts[0] || '';
+      const rightCode = parts[1] || '';
+      const bgCode = parts[2] || '';
+      const activeCode = parts[3] || '';
+      
+      return {
+        left: decodeCharacter(leftCode),
+        center: null,
+        right: decodeCharacter(rightCode),
+        bg: BACKGROUND_CODES[bgCode] || null,
+        active: POSITION_CODES[activeCode] || null,
+        layout: layout
+      };
+    } else {
+      // 3인 구도: left.center.right.bg.active.3 (최소 6개 필요)
+      if (parts.length < 6) {
+        console.log('3인 구도 파라미터 부족:', parts.length);
+        // 부족한 경우 기존 방식으로 처리 (하위 호환성)
+        const leftCode = parts[0] || '';
+        const centerCode = parts[1] || '';
+        const rightCode = parts[2] || '';
+        const bgCode = parts[3] || '';
+        const activeCode = parts[4] || '';
+        
+        return {
+          left: decodeCharacter(leftCode),
+          center: decodeCharacter(centerCode),
+          right: decodeCharacter(rightCode),
+          bg: BACKGROUND_CODES[bgCode] || null,
+          active: POSITION_CODES[activeCode] || null,
+          layout: 'three_person'
+        };
+      }
+      
+      const leftCode = parts[0] || '';
+      const centerCode = parts[1] || '';
+      const rightCode = parts[2] || '';
+      const bgCode = parts[3] || '';
+      const activeCode = parts[4] || '';
+      
+      return {
+        left: decodeCharacter(leftCode),
+        center: decodeCharacter(centerCode),
+        right: decodeCharacter(rightCode),
+        bg: BACKGROUND_CODES[bgCode] || null,
+        active: POSITION_CODES[activeCode] || null,
+        layout: layout
+      };
+    }
+  } catch (error) {
+    console.log('decodeParams 에러:', error.message);
+    return { layout: 'three_person' }; // 안전한 기본값 반환
   }
 }
 
