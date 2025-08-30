@@ -1,11 +1,12 @@
-// api/c.js - 롤백 버전 + 캐릭터별 키 기능
+// api/c.js - 수정된 버전 (import 문제 해결)
 const sharp = require('sharp');
 
 // 매핑 테이블들
 const CHARACTER_CODES = {
   'a': 'girlA',
   'b': 'girlB', 
-  'c': 'girlC'
+  'c': 'boyC',
+  'd': 'catD'
 };
 
 const EMOTION_CODES = {
@@ -14,8 +15,7 @@ const EMOTION_CODES = {
   '3': 'sad', 
   '4': 'smile',
   '5': 'surprised',
-  '6': 'sleepy',
-  'v': 'v'
+  '6': 'sleepy'
 };
 
 const BACKGROUND_CODES = {
@@ -33,25 +33,11 @@ const POSITION_CODES = {
   'r': 'right'
 };
 
-// 캐릭터별 고정 키 설정
-const CHARACTER_HEIGHTS = {
-  'girlA': 's',   // 작은 키
-  'girlB': 'm',   // 중간 키
-  'girlC': 'l'    // 큰 키
-};
-
-// 키별 하단 크롭 비율 (3인 구도 기준)
-const HEIGHT_CROP_RATIOS = {
-  's': 0.05,   // 5% 하단 잘림
-  'm': 0.025,  // 2.5% 하단 잘림
-  'l': 0.00    // 잘림 없음
-};
-
 function decodeCharacter(charCode) {
   if (!charCode || charCode.length < 2) return null;
   
   const character = CHARACTER_CODES[charCode[0]];
-  const emotion = EMOTION_CODES[charCode[1]] || EMOTION_CODES[charCode.slice(1)]; // v는 한 글자
+  const emotion = EMOTION_CODES[charCode[1]];
   
   if (!character || !emotion) return null;
   
@@ -71,19 +57,6 @@ function decodeParams(paramString) {
     bg: BACKGROUND_CODES[bgCode] || null,
     active: POSITION_CODES[activeCode] || null
   };
-}
-
-function getHeightAdjustment(characterName) {
-  if (!characterName) return 0;
-  
-  // 캐릭터명에서 실제 캐릭터 추출 (예: 'girlA_angry' -> 'girlA')
-  const baseCharacter = characterName.split('_')[0];
-  const heightType = CHARACTER_HEIGHTS[baseCharacter] || 'l'; // 기본값: 큰 키
-  
-  const baseSize = 740; // 기본 캐릭터 크기
-  const cropRatio = HEIGHT_CROP_RATIOS[heightType] || 0;
-  
-  return Math.floor(baseSize * cropRatio);
 }
 
 export default async function handler(req, res) {
@@ -131,11 +104,7 @@ export default async function handler(req, res) {
           throw new Error('배경 이미지 로드 실패');
         }
       } catch (e) {
-        const bgColors = { 
-          forest: { r: 45, g: 80, b: 22 }, 
-          beach: { r: 135, g: 206, b: 235 },
-          home: { r: 200, g: 150, b: 100 }
-        };
+        const bgColors = { forest: { r: 45, g: 80, b: 22 }, beach: { r: 135, g: 206, b: 235 } };
         const bgColor = bgColors[bg] || { r: 200, g: 200, b: 200 };
         baseImage = sharp({ create: { width, height, channels: 4, background: { ...bgColor, alpha: 1 } } });
       }
@@ -151,43 +120,21 @@ export default async function handler(req, res) {
     
     const overlays = [];
     
-    // 3. 캐릭터 처리 (디버깅 추가)
+    // 3. 캐릭터 처리
     for (const [pos, charName] of Object.entries({ left, center, right })) {
       if (charName && charName !== 'none') {
         try {
-          console.log(`${pos} 캐릭터 처리 시작:`, charName);
           const charUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/characters/${charName}.png`;
-          console.log(`${pos} URL:`, charUrl);
-          
           const charResponse = await fetch(charUrl);
-          console.log(`${pos} HTTP 상태:`, charResponse.status);
           
           if (charResponse.ok) {
             const charBuffer = await charResponse.arrayBuffer();
-            console.log(`${pos} 이미지 크기:`, charBuffer.byteLength, 'bytes');
             
-            // 기본 리사이즈
             let charProcessor = sharp(Buffer.from(charBuffer))
-              .resize({ height: 740, withoutEnlargement: true, fit: 'contain' });
+              .resize({ height: 720, withoutEnlargement: true, fit: 'contain' });
             
-            // 캐릭터 키에 따른 하단 크롭 (일시 비활성화 - 테스트용)
-            /*
-            const heightAdjustment = getHeightAdjustment(charName);
-            if (heightAdjustment > 0) {
-              const metadata = await charProcessor.metadata();
-              charProcessor = charProcessor.extract({
-                left: 0,
-                top: 0,
-                width: metadata.width,
-                height: Math.max(1, metadata.height - heightAdjustment)
-              });
-            }
-            */
-            
-            // 활성화 상태에 따른 어둡게 처리
             const isActive = active === pos;
             if (!isActive && active) {
-              console.log(`${pos} 어둡게 처리 적용`);
               charProcessor = charProcessor
                 .linear(0.5, -15)
                 .modulate({ brightness: 0.7, saturation: 0.6 });
@@ -195,7 +142,6 @@ export default async function handler(req, res) {
             
             const processedCharBuffer = await charProcessor.png().toBuffer();
             const charMeta = await sharp(processedCharBuffer).metadata();
-            console.log(`${pos} 처리 완료:`, charMeta.width, 'x', charMeta.height);
             
             overlays.push({
               input: processedCharBuffer,
@@ -203,19 +149,12 @@ export default async function handler(req, res) {
               top: Math.round(positions[pos].y - charMeta.height)
             });
             
-            console.log(`${pos} 오버레이 추가 완료`);
-          } else {
-            console.log(`${pos} 캐릭터 HTTP 에러:`, charResponse.status);
           }
         } catch (e) {
-          console.log(`${pos} 캐릭터 처리 에러:`, e.message);
+          console.log(`캐릭터 처리 에러: ${charName}`, e.message);
         }
-      } else {
-        console.log(`${pos} 캐릭터 없음:`, charName);
       }
     }
-    
-    console.log('총 오버레이 개수:', overlays.length);
     
     // 4. 최종 합성
     let finalImage = baseImage;
@@ -252,7 +191,7 @@ export default async function handler(req, res) {
     res.send(imageBuffer);
     
   } catch (error) {
-    console.error('이미지 합성 에러:', error);
+    console.error('API 에러:', error);
     
     const errorImage = sharp({
       create: { width: 1440, height: 960, channels: 4, background: { r: 255, g: 200, b: 200, alpha: 1 } }
