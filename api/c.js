@@ -54,6 +54,11 @@ function decodeCharacter(charCode) {
   
   if (!character || !emotion) return null;
   
+  // girlC의 경우 특별 처리 (파일명이 girlC_v이므로)
+  if (character === 'girlC') {
+    return 'girlC_v';
+  }
+  
   return `${character}_${emotion}`;
 }
 
