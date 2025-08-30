@@ -5,6 +5,24 @@ export default async function handler(req, res) {
   try {
     const { left, center, right, bg, active } = req.query;
     
+    // 캐시 키 생성
+    const cacheKey = `${left || 'none'}_${center || 'none'}_${right || 'none'}_${bg || 'none'}_${active || 'none'}`;
+    
+    // 1. 먼저 GitHub에서 캐시된 파일 확인
+    try {
+      const cacheUrl = `https://raw.githubusercontent.com/reat333/generated-cache/main/generated/${cacheKey}.png`;
+      const cacheCheck = await fetch(cacheUrl);
+      
+      if (cacheCheck.ok) {
+        const imageBuffer = await cacheCheck.arrayBuffer();
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1년 캐시
+        return res.send(Buffer.from(imageBuffer));
+      }
+    } catch (e) {
+      // 캐시 파일 없음, 새로 생성
+    }
+    
     const width = 1440;
     const height = 960;
     
@@ -98,6 +116,26 @@ export default async function handler(req, res) {
     }
     
     const imageBuffer = await finalImage.png({ quality: 90 }).toBuffer();
+    
+    // 4. 생성된 이미지를 GitHub에 캐시로 저장
+    try {
+      const base64Image = imageBuffer.toString('base64');
+      const githubSaveUrl = `https://api.github.com/repos/reat333/generated-cache/contents/generated/${cacheKey}.png`;
+      
+      await fetch(githubSaveUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${process.env.GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: `Add cached image ${cacheKey}`,
+          content: base64Image,
+        })
+      });
+    } catch (cacheError) {
+      console.log('캐시 저장 실패 (응답에는 영향 없음):', cacheError.message);
+    }
     
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
