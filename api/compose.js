@@ -16,7 +16,9 @@ export default async function handler(req, res) {
       if (cacheCheck.ok) {
         const imageBuffer = await cacheCheck.arrayBuffer();
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1년 캐시
+        res.setHeader('Cache-Control', 'public, max-age=31536000');
+        res.setHeader('X-Cache-Status', 'HIT'); // 캐시에서 가져옴
+        res.setHeader('X-Cache-Key', cacheKey);
         return res.send(Buffer.from(imageBuffer));
       }
     } catch (e) {
@@ -139,6 +141,8 @@ export default async function handler(req, res) {
     
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('X-Cache-Status', 'MISS'); // 새로 생성됨
+    res.setHeader('X-Cache-Key', cacheKey);
     res.send(imageBuffer);
     
   } catch (error) {
