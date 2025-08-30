@@ -1,6 +1,7 @@
-// api/c.js - 최소 기능 테스트 버전
+// api/c.js - 롤백 버전 + 캐릭터별 키 기능
 const sharp = require('sharp');
 
+// 매핑 테이블들
 const CHARACTER_CODES = {
   'a': 'girlA',
   'b': 'girlB', 
@@ -31,6 +32,20 @@ const POSITION_CODES = {
   'r': 'right'
 };
 
+// 캐릭터별 고정 키 설정
+const CHARACTER_HEIGHTS = {
+  'girlA': 's',   // 작은 키
+  'girlB': 'm',   // 중간 키
+  'girlC': 'l'    // 큰 키
+};
+
+// 키별 하단 크롭 비율 (3인 구도 기준)
+const HEIGHT_CROP_RATIOS = {
+  's': 0.05,   // 5% 하단 잘림
+  'm': 0.025,  // 2.5% 하단 잘림
+  'l': 0.00    // 잘림 없음
+};
+
 function decodeCharacter(charCode) {
   if (!charCode || charCode.length < 2) return null;
   
@@ -42,154 +57,128 @@ function decodeCharacter(charCode) {
   return `${character}_${emotion}`;
 }
 
+function decodeParams(paramString) {
+  if (!paramString) return {};
+  
+  const parts = paramString.split('.');
+  const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts;
+  
+  return {
+    left: decodeCharacter(leftCode),
+    center: decodeCharacter(centerCode), 
+    right: decodeCharacter(rightCode),
+    bg: BACKGROUND_CODES[bgCode] || null,
+    active: POSITION_CODES[activeCode] || null
+  };
+}
+
+function getHeightAdjustment(characterName) {
+  if (!characterName) return 0;
+  
+  // 캐릭터명에서 실제 캐릭터 추출 (예: 'girlA_angry' -> 'girlA')
+  const baseCharacter = characterName.split('_')[0];
+  const heightType = CHARACTER_HEIGHTS[baseCharacter] || 'l'; // 기본값: 큰 키
+  
+  const baseSize = 740; // 기본 캐릭터 크기
+  const cropRatio = HEIGHT_CROP_RATIOS[heightType] || 0;
+  
+  return Math.floor(baseSize * cropRatio);
+}
+
 export default async function handler(req, res) {
   try {
-    console.log('API 시작, 쿼리:', req.query);
-    
     const { p } = req.query;
     
-    // 파라미터가 없으면 테스트 이미지 반환
-    if (!p) {
-      console.log('파라미터 없음, 테스트 이미지 생성');
-      
-      const testImage = sharp({
-        create: {
-          width: 1440,
-          height: 960,
-          channels: 4,
-          background: { r: 100, g: 200, b: 100, alpha: 1 }
-        }
-      });
-      
-      const testBuffer = await testImage.png().toBuffer();
-      
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('X-Status', 'TEST');
-      return res.send(testBuffer);
-    }
-    
-    console.log('파라미터:', p);
-    
-    // 간단한 파싱
-    const parts = p.split('.');
-    console.log('파싱된 부분:', parts);
-    
-    let left = null, center = null, right = null, bg = null, active = null;
-    
-    // 안전한 파싱
-    if (parts.length >= 5) {
-      // 기존 방식 (하위 호환성)
-      left = decodeCharacter(parts[0]);
-      center = decodeCharacter(parts[1]);
-      right = decodeCharacter(parts[2]);
-      bg = BACKGROUND_CODES[parts[3]] || null;
-      active = POSITION_CODES[parts[4]] || null;
-    }
-    
-    console.log('디코딩 결과:', { left, center, right, bg, active });
+    // 짧은 코드를 원래 파라미터로 변환
+    const { left, center, right, bg, active } = decodeParams(p);
     
     // 캐시 키 생성
     const cacheKey = `${left || 'none'}_${center || 'none'}_${right || 'none'}_${bg || 'none'}_${active || 'none'}`;
-    console.log('캐시 키:', cacheKey);
     
-    // 캐시 확인
+    // 1. 캐시 확인
     try {
       const cacheUrl = `https://raw.githubusercontent.com/reat333/generated-cache/main/generated/${cacheKey}.png`;
       const cacheCheck = await fetch(cacheUrl);
       
       if (cacheCheck.ok) {
-        console.log('캐시 HIT');
         const imageBuffer = await cacheCheck.arrayBuffer();
         res.setHeader('Content-Type', 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=31536000');
         res.setHeader('X-Cache-Status', 'HIT');
+        res.setHeader('X-Decoded-Params', JSON.stringify({left, center, right, bg, active}));
         return res.send(Buffer.from(imageBuffer));
-      } else {
-        console.log('캐시 MISS');
       }
     } catch (e) {
-      console.log('캐시 확인 에러:', e.message);
+      // 캐시 없음, 새로 생성
     }
     
-    // 기본 이미지 생성
-    console.log('새 이미지 생성 시작, bg:', bg);
+    const width = 1440;
+    const height = 960;
     
+    // 2. 배경 처리
     let baseImage;
     
     if (bg) {
       try {
         const bgUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/backgrounds/${bg}.png`;
-        console.log('배경 URL:', bgUrl);
         const bgResponse = await fetch(bgUrl);
         
         if (bgResponse.ok) {
-          console.log('배경 이미지 로드 성공');
           const bgBuffer = await bgResponse.arrayBuffer();
-          baseImage = sharp(Buffer.from(bgBuffer)).resize(1440, 960).png();
+          baseImage = sharp(Buffer.from(bgBuffer)).resize(width, height).png();
         } else {
-          console.log('배경 이미지 로드 실패, 상태:', bgResponse.status);
           throw new Error('배경 이미지 로드 실패');
         }
       } catch (e) {
-        console.log('배경 처리 에러:', e.message);
-        // 배경별 기본 색상
         const bgColors = { 
           forest: { r: 45, g: 80, b: 22 }, 
           beach: { r: 135, g: 206, b: 235 },
           home: { r: 200, g: 150, b: 100 }
         };
         const bgColor = bgColors[bg] || { r: 200, g: 200, b: 200 };
-        
-        baseImage = sharp({
-          create: {
-            width: 1440,
-            height: 960,
-            channels: 4,
-            background: { ...bgColor, alpha: 1 }
-          }
-        });
+        baseImage = sharp({ create: { width, height, channels: 4, background: { ...bgColor, alpha: 1 } } });
       }
     } else {
-      console.log('배경 없음, 기본 배경 사용');
-      baseImage = sharp({
-        create: {
-          width: 1440,
-          height: 960,
-          channels: 4,
-          background: { r: 240, g: 240, b: 240, alpha: 1 }
-        }
-      });
+      baseImage = sharp({ create: { width, height, channels: 4, background: { r: 240, g: 240, b: 240, alpha: 1 } } });
     }
     
-    // 캐릭터 처리 추가
-    const overlays = [];
     const positions = {
-      left: { x: 360, y: 960 },
-      center: { x: 720, y: 960 },
-      right: { x: 1080, y: 960 }
+      left: { x: 360, y: height },
+      center: { x: 720, y: height },
+      right: { x: 1080, y: height }
     };
     
-    console.log('캐릭터 처리 시작');
+    const overlays = [];
     
+    // 3. 캐릭터 처리
     for (const [pos, charName] of Object.entries({ left, center, right })) {
       if (charName && charName !== 'none') {
         try {
-          console.log(`${pos} 캐릭터 처리:`, charName);
           const charUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/characters/${charName}.png`;
           const charResponse = await fetch(charUrl);
           
           if (charResponse.ok) {
-            console.log(`${pos} 캐릭터 로드 성공`);
             const charBuffer = await charResponse.arrayBuffer();
             
+            // 기본 리사이즈
             let charProcessor = sharp(Buffer.from(charBuffer))
               .resize({ height: 740, withoutEnlargement: true, fit: 'contain' });
+            
+            // 캐릭터 키에 따른 하단 크롭
+            const heightAdjustment = getHeightAdjustment(charName);
+            if (heightAdjustment > 0) {
+              const metadata = await charProcessor.metadata();
+              charProcessor = charProcessor.extract({
+                left: 0,
+                top: 0,
+                width: metadata.width,
+                height: Math.max(1, metadata.height - heightAdjustment)
+              });
+            }
             
             // 활성화 상태에 따른 어둡게 처리
             const isActive = active === pos;
             if (!isActive && active) {
-              console.log(`${pos} 캐릭터 어둡게 처리`);
               charProcessor = charProcessor
                 .linear(0.5, -15)
                 .modulate({ brightness: 0.7, saturation: 0.6 });
@@ -204,28 +193,40 @@ export default async function handler(req, res) {
               top: Math.round(positions[pos].y - charMeta.height)
             });
             
-            console.log(`${pos} 캐릭터 오버레이 추가 완료`);
-          } else {
-            console.log(`${pos} 캐릭터 로드 실패:`, charResponse.status);
           }
         } catch (e) {
-          console.log(`${pos} 캐릭터 처리 에러:`, e.message);
+          console.log(`캐릭터 처리 에러: ${charName}`, e.message);
         }
       }
     }
     
-    console.log('총 오버레이 개수:', overlays.length);
-    
-    // 최종 합성
+    // 4. 최종 합성
     let finalImage = baseImage;
     if (overlays.length > 0) {
-      console.log('캐릭터 합성 시작');
       finalImage = baseImage.composite(overlays);
     }
     
-    const imageBuffer = await finalImage.png().toBuffer();
+    const imageBuffer = await finalImage.png({ quality: 90 }).toBuffer();
     
-    console.log('이미지 생성 완료, 크기:', imageBuffer.length);
+    // 5. 캐시 저장
+    try {
+      const base64Image = imageBuffer.toString('base64');
+      const githubSaveUrl = `https://api.github.com/repos/reat333/generated-cache/contents/generated/${cacheKey}.png`;
+      
+      await fetch(githubSaveUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${process.env.GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: `Add cached image ${cacheKey}`,
+          content: base64Image,
+        })
+      });
+    } catch (cacheError) {
+      console.log('캐시 저장 실패:', cacheError.message);
+    }
     
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
@@ -234,14 +235,14 @@ export default async function handler(req, res) {
     res.send(imageBuffer);
     
   } catch (error) {
-    console.error('전체 에러:', error);
-    console.error('에러 스택:', error.stack);
+    console.error('이미지 합성 에러:', error);
     
-    // 최후 수단 응답
-    res.status(500).json({
-      error: '이미지 생성 실패',
-      message: error.message,
-      stack: error.stack
+    const errorImage = sharp({
+      create: { width: 1440, height: 960, channels: 4, background: { r: 255, g: 200, b: 200, alpha: 1 } }
     });
+    
+    const errorBuffer = await errorImage.png().toBuffer();
+    res.setHeader('Content-Type', 'image/png');
+    res.send(errorBuffer);
   }
 }
