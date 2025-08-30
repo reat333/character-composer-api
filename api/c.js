@@ -41,8 +41,8 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
-// 로직 변경 시 이 버전을 올려주세요. v11: 에러 수정 최종본
-const CACHE_VERSION = 'v11';
+// 로직 변경 시 이 버전을 올려주세요. v12: 안정화 버전 (아웃라인 기능 임시 제거)
+const CACHE_VERSION = 'v12';
 
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
@@ -147,9 +147,9 @@ export default async function handler(req, res) {
     };
 
     let inactiveOverlays = [];
-    let activeOverlays = [];
+    let activeOverlay = null;
 
-    // 4. 캐릭터 처리
+    // 4. 캐릭터 처리 (v12 - 아웃라인 제거, 안정화된 로직)
     for (const [index, charData] of characters.entries()) {
       if (!charData) continue;
       const pos = ['left', 'center', 'right'][index];
@@ -160,49 +160,30 @@ export default async function handler(req, res) {
 
         const charBuffer = await charResponse.arrayBuffer();
         
-        // 1. 원본 리사이즈
-        const resizedCharBuffer = await sharp(charBuffer)
-          .resize({ height: characterResizeHeight, fit: 'contain' })
-          .png()
-          .toBuffer();
-
-        // 2. 하얀색 실루엣 생성 (v11 - blur와 threshold를 이용한 안정적인 방식)
-        const outlineSize = 8;
-        const silhouetteBuffer = await sharp(resizedCharBuffer)
-            .extractChannel('alpha')
-            .blur(outlineSize / 2)
-            .threshold(128)
-            .tint({ r: 255, g: 255, b: 255 })
-            .png()
-            .toBuffer();
-        
-        // 3. 위치 계산을 위한 메타데이터 추출 (실루엣 기준)
-        const silhouetteMeta = await sharp(silhouetteBuffer).metadata();
-        const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
-        const verticalOffset = Math.round(silhouetteMeta.height * cropRatio);
-        
-        const finalLeft = Math.round(positions[pos].x - (silhouetteMeta.width / 2));
-        const finalTop = Math.round(positions[pos].y - silhouetteMeta.height + verticalOffset);
-
-        // 4. 비활성 캐릭터의 '캐릭터' 레이어만 어둡게 처리
         const isActive = active === pos;
-        let finalCharBuffer = resizedCharBuffer;
+        let charProcessor = sharp(charBuffer)
+          .resize({ height: characterResizeHeight, fit: 'contain' });
+
         if (!isActive && active) {
-          finalCharBuffer = await sharp(resizedCharBuffer)
-            .modulate({ brightness: 0.7, saturation: 0.6 })
-            .png()
-            .toBuffer();
+          charProcessor = charProcessor.modulate({ brightness: 0.7, saturation: 0.6 });
         }
         
-        // 5. 실루엣과 캐릭터를 '별도의' 레이어로 준비
-        const silhouetteOverlay = { input: silhouetteBuffer, left: finalLeft, top: finalTop };
-        const characterOverlay = { input: finalCharBuffer, left: finalLeft, top: finalTop };
+        const finalCharBuffer = await charProcessor.png().toBuffer();
+        
+        const charMeta = await sharp(finalCharBuffer).metadata();
+        const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
+        const verticalOffset = Math.round(charMeta.height * cropRatio);
+        
+        const overlay = {
+            input: finalCharBuffer,
+            left: Math.round(positions[pos].x - (charMeta.width / 2)),
+            top: Math.round(positions[pos].y - charMeta.height + verticalOffset)
+        };
 
-        // 6. 순서에 맞게 배열에 추가 (실루엣 -> 캐릭터 순)
         if (isActive) {
-            activeOverlays.push(silhouetteOverlay, characterOverlay);
+            activeOverlay = overlay;
         } else {
-            inactiveOverlays.push(silhouetteOverlay, characterOverlay);
+            inactiveOverlays.push(overlay);
         }
 
       } catch (e) {
@@ -211,7 +192,11 @@ export default async function handler(req, res) {
     }
 
     // 5. 최종 합성 (비활성 레이어 먼저, 활성 레이어 나중에)
-    const allOverlays = [...inactiveOverlays, ...activeOverlays];
+    const allOverlays = [...inactiveOverlays];
+    if (activeOverlay) {
+        allOverlays.push(activeOverlay);
+    }
+
     const finalImage = baseImage.composite(allOverlays);
     const imageBuffer = await finalImage.png({ quality: 90 }).toBuffer();
 
