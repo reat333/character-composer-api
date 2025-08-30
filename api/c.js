@@ -157,25 +157,36 @@ export default async function handler(req, res) {
         if (!charResponse.ok) continue;
 
         const charBuffer = await charResponse.arrayBuffer();
-        let charProcessor = sharp(Buffer.from(charBuffer))
-          .resize({ height: characterResizeHeight, fit: 'contain' });
+        
+        // --- BUG FIX START ---
+        // 1. 먼저 리사이즈하고, 효과 적용 전의 메타데이터를 확보합니다.
+        const resizedCharBuffer = await sharp(charBuffer)
+          .resize({ height: characterResizeHeight, fit: 'contain' })
+          .png()
+          .toBuffer();
 
+        const charMeta = await sharp(resizedCharBuffer).metadata();
+
+        // 2. 최종적으로 사용할 버퍼를 결정합니다 (비활성 시 효과 적용).
+        let finalCharBuffer = resizedCharBuffer;
         const isActive = active === pos;
         if (!isActive && active) {
-          charProcessor = charProcessor.modulate({ brightness: 0.7, saturation: 0.6 });
+          finalCharBuffer = await sharp(resizedCharBuffer)
+            .modulate({ brightness: 0.7, saturation: 0.6 })
+            .png()
+            .toBuffer();
         }
-
-        const processedCharBuffer = await charProcessor.png().toBuffer();
-        const charMeta = await sharp(processedCharBuffer).metadata();
         
+        // 3. 일관된 메타데이터로 위치를 계산합니다.
         const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
         const verticalOffset = Math.round(charMeta.height * cropRatio);
 
         const overlay = {
-          input: processedCharBuffer,
+          input: finalCharBuffer, // 효과가 적용된 최종 이미지를 사용
           left: Math.round(positions[pos].x - (charMeta.width / 2)),
-          top: Math.round(positions[pos].y - charMeta.height + verticalOffset)
+          top: Math.round(positions[pos].y - charMeta.height + verticalOffset) // 위치 계산은 원본 높이 기준
         };
+        // --- BUG FIX END ---
         
         if (isActive) {
           activeOverlay = overlay;
@@ -230,5 +241,4 @@ export default async function handler(req, res) {
     res.status(500).send(errorBuffer);
   }
 }
-
 
