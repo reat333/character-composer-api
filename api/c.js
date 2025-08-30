@@ -41,8 +41,8 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
-// 로직 변경 시 이 버전을 올려주세요. v9: 아웃라인 생성 최종 수정
-const CACHE_VERSION = 'v9';
+// 로직 변경 시 이 버전을 올려주세요. v10: 최종 안정화
+const CACHE_VERSION = 'v10';
 
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
@@ -55,7 +55,7 @@ function decodeCharacter(charCode) {
   const charKey = charCode[0];
   const character = CHARACTER_CODES[charKey];
   const emotion = EMOTION_CODES[charCode[1]];
-  const height = CHARACTER_HEIGHTS[charKey]; // URL에서 키를 받는 대신, 고정된 값 사용
+  const height = CHARACTER_HEIGHTS[charKey];
 
   if (!character || !emotion || !height) return null;
 
@@ -105,7 +105,6 @@ export default async function handler(req, res) {
         res.setHeader('Content-Type', 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=31536000');
         res.setHeader('X-Cache-Status', 'HIT');
-        res.setHeader('X-Decoded-Params', JSON.stringify({left, center, right, bg, active}));
         return res.send(Buffer.from(imageBuffer));
       }
     } catch (e) {
@@ -147,8 +146,8 @@ export default async function handler(req, res) {
       right: { x: isStrictlyTwoCharLayout ? (width * 3) / 4 : 1180, y: height }
     };
 
-    const overlays = [];
-    let activeOverlay = null;
+    let inactiveOverlays = [];
+    let activeOverlays = [];
 
     // 4. 캐릭터 처리
     for (const [index, charData] of characters.entries()) {
@@ -161,7 +160,7 @@ export default async function handler(req, res) {
 
         const charBuffer = await charResponse.arrayBuffer();
         
-        // --- 캐릭터 효과 처리 (v9 - 가장 안정적인 캔버스 합성 방식) ---
+        // --- 캐릭터 효과 처리 (v10 - 레이어 분리 합성 방식) ---
         // 1. 원본 리사이즈
         const resizedCharBuffer = await sharp(charBuffer)
           .resize({ height: characterResizeHeight, fit: 'contain' })
@@ -177,49 +176,33 @@ export default async function handler(req, res) {
             .png()
             .toBuffer();
         
+        // 3. 위치 계산을 위한 메타데이터 추출 (실루엣 기준)
         const silhouetteMeta = await sharp(silhouetteBuffer).metadata();
+        const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
+        const verticalOffset = Math.round(silhouetteMeta.height * cropRatio);
+        
+        const finalLeft = Math.round(positions[pos].x - (silhouetteMeta.width / 2));
+        const finalTop = Math.round(positions[pos].y - silhouetteMeta.height + verticalOffset);
 
-        // 3. 실루엣 크기의 투명 캔버스에 실루엣과 원본 캐릭터를 합성하여 '단일' 이미지로 만듦
-        const outlinedCharBuffer = await sharp({
-            create: {
-                width: silhouetteMeta.width,
-                height: silhouetteMeta.height,
-                channels: 4,
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
-            }
-        })
-        .composite([
-            { input: silhouetteBuffer },
-            { input: resizedCharBuffer, gravity: 'center' }
-        ])
-        .png()
-        .toBuffer();
-
-        // 4. 완성된 캐릭터+아웃라인 이미지에 비활성 효과 적용
+        // 4. 비활성 캐릭터의 '캐릭터' 레이어만 어둡게 처리
         const isActive = active === pos;
-        let finalCharBuffer = outlinedCharBuffer;
+        let finalCharBuffer = resizedCharBuffer;
         if (!isActive && active) {
-          finalCharBuffer = await sharp(outlinedCharBuffer)
+          finalCharBuffer = await sharp(resizedCharBuffer)
             .modulate({ brightness: 0.7, saturation: 0.6 })
             .png()
             .toBuffer();
         }
         
-        // 5. 최종 완성된 단일 이미지를 기준으로 위치 계산
-        const charMeta = await sharp(finalCharBuffer).metadata();
-        const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
-        const verticalOffset = Math.round(charMeta.height * cropRatio);
-        
-        const overlay = {
-            input: finalCharBuffer,
-            left: Math.round(positions[pos].x - (charMeta.width / 2)),
-            top: Math.round(positions[pos].y - charMeta.height + verticalOffset)
-        };
+        // 5. 실루엣과 캐릭터를 '별도의' 레이어로 준비
+        const silhouetteOverlay = { input: silhouetteBuffer, left: finalLeft, top: finalTop };
+        const characterOverlay = { input: finalCharBuffer, left: finalLeft, top: finalTop };
 
+        // 6. 순서에 맞게 배열에 추가 (실루엣 -> 캐릭터 순)
         if (isActive) {
-            activeOverlay = overlay;
+            activeOverlays.push(silhouetteOverlay, characterOverlay);
         } else {
-            overlays.push(overlay);
+            inactiveOverlays.push(silhouetteOverlay, characterOverlay);
         }
 
       } catch (e) {
@@ -228,10 +211,8 @@ export default async function handler(req, res) {
     }
 
     // 5. 최종 합성 (비활성 레이어 먼저, 활성 레이어 나중에)
-    if (activeOverlay) {
-        overlays.push(activeOverlay);
-    }
-    const finalImage = baseImage.composite(overlays);
+    const allOverlays = [...inactiveOverlays, ...activeOverlays];
+    const finalImage = baseImage.composite(allOverlays);
     const imageBuffer = await finalImage.png({ quality: 90 }).toBuffer();
 
     // 6. 캐시 저장
