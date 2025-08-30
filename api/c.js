@@ -41,6 +41,9 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
+// 로직 변경 시 이 버전을 올려주세요. v1:초기, v2:키버그수정, v3:3인구도수정
+const CACHE_VERSION = 'v3';
+
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
  * @param {string} charCode - 예: "a1" (캐릭터a, 감정1)
@@ -90,7 +93,7 @@ export default async function handler(req, res) {
     }
 
     const { left, center, right, bg, active } = decodeParams(p);
-    const cacheKey = p.replace(/\./g, '_');
+    const cacheKey = `${p.replace(/\./g, '_')}_${CACHE_VERSION}`;
 
     // 1. 캐시 확인
     try {
@@ -241,5 +244,4 @@ export default async function handler(req, res) {
     res.status(500).send(errorBuffer);
   }
 }
-
 
