@@ -41,8 +41,8 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
-// 로직 변경 시 이 버전을 올려주세요. v1:초기, v2:키버그수정, v3:3인구도수정
-const CACHE_VERSION = 'v3';
+// 로직 변경 시 이 버전을 올려주세요. v1:초기, v2:키버그수정, v3:3인구도수정, v4:캐릭터아웃라인추가
+const CACHE_VERSION = 'v4';
 
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
@@ -161,35 +161,59 @@ export default async function handler(req, res) {
 
         const charBuffer = await charResponse.arrayBuffer();
         
-        // --- BUG FIX START ---
-        // 1. 먼저 리사이즈하고, 효과 적용 전의 메타데이터를 확보합니다.
+        // --- 캐릭터 효과 처리 ---
+        // 1. 원본 리사이즈
         const resizedCharBuffer = await sharp(charBuffer)
           .resize({ height: characterResizeHeight, fit: 'contain' })
           .png()
           .toBuffer();
 
-        const charMeta = await sharp(resizedCharBuffer).metadata();
+        // 2. 하얀색 아웃라인 생성
+        const outlineSize = 4; // 아웃라인 두께 (px)
+        const dilatedMaskData = await sharp(resizedCharBuffer)
+            .extractChannel('alpha')
+            .dilate(outlineSize)
+            .raw()
+            .toBuffer({ resolveWithObject: true });
 
-        // 2. 최종적으로 사용할 버퍼를 결정합니다 (비활성 시 효과 적용).
-        let finalCharBuffer = resizedCharBuffer;
+        const whiteOutline = await sharp({
+            create: {
+                width: dilatedMaskData.info.width,
+                height: dilatedMaskData.info.height,
+                channels: 3,
+                background: { r: 255, g: 255, b: 255 }
+            }
+        })
+        .joinChannel(dilatedMaskData.data, { raw: { width: dilatedMaskData.info.width, height: dilatedMaskData.info.height, channels: 1 } })
+        .png()
+        .toBuffer();
+        
+        // 3. 아웃라인 위에 원본 캐릭터 합성
+        const outlinedCharBuffer = await sharp(whiteOutline)
+            .composite([{ input: resizedCharBuffer }])
+            .png()
+            .toBuffer();
+        const charMeta = await sharp(outlinedCharBuffer).metadata(); // 최종 메타데이터
+
+        // 4. 최종적으로 사용할 버퍼 결정 (비활성 시 효과 적용)
+        let finalCharBuffer = outlinedCharBuffer;
         const isActive = active === pos;
         if (!isActive && active) {
-          finalCharBuffer = await sharp(resizedCharBuffer)
+          finalCharBuffer = await sharp(outlinedCharBuffer)
             .modulate({ brightness: 0.7, saturation: 0.6 })
             .png()
             .toBuffer();
         }
         
-        // 3. 일관된 메타데이터로 위치를 계산합니다.
+        // 5. 일관된 메타데이터로 위치 계산
         const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
         const verticalOffset = Math.round(charMeta.height * cropRatio);
 
         const overlay = {
-          input: finalCharBuffer, // 효과가 적용된 최종 이미지를 사용
+          input: finalCharBuffer,
           left: Math.round(positions[pos].x - (charMeta.width / 2)),
-          top: Math.round(positions[pos].y - charMeta.height + verticalOffset) // 위치 계산은 원본 높이 기준
+          top: Math.round(positions[pos].y - charMeta.height + verticalOffset)
         };
-        // --- BUG FIX END ---
         
         if (isActive) {
           activeOverlay = overlay;
