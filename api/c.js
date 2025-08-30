@@ -41,8 +41,8 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
-// 로직 변경 시 이 버전을 올려주세요. v10: 최종 안정화
-const CACHE_VERSION = 'v10';
+// 로직 변경 시 이 버전을 올려주세요. v11: 에러 수정 최종본
+const CACHE_VERSION = 'v11';
 
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
@@ -160,18 +160,18 @@ export default async function handler(req, res) {
 
         const charBuffer = await charResponse.arrayBuffer();
         
-        // --- 캐릭터 효과 처리 (v10 - 레이어 분리 합성 방식) ---
         // 1. 원본 리사이즈
         const resizedCharBuffer = await sharp(charBuffer)
           .resize({ height: characterResizeHeight, fit: 'contain' })
           .png()
           .toBuffer();
 
-        // 2. 하얀색 실루엣 생성
-        const outlineSize = 4;
+        // 2. 하얀색 실루엣 생성 (v11 - blur와 threshold를 이용한 안정적인 방식)
+        const outlineSize = 8;
         const silhouetteBuffer = await sharp(resizedCharBuffer)
             .extractChannel('alpha')
-            .dilate(outlineSize)
+            .blur(outlineSize / 2)
+            .threshold(128)
             .tint({ r: 255, g: 255, b: 255 })
             .png()
             .toBuffer();
@@ -206,7 +206,7 @@ export default async function handler(req, res) {
         }
 
       } catch (e) {
-        console.error(`Error processing character ${charData.name}:`, e.message);
+        console.error(`Error processing character ${charData.name}:`, e);
       }
     }
 
