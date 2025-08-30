@@ -23,8 +23,7 @@ const BACKGROUND_CODES = {
   'b': 'beach', 
   'c': 'classroom',
   'r': 'bedroom',
-  'p': 'park',
-  'h': 'home'
+  'p': 'park'
 };
 
 const POSITION_CODES = {
