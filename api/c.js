@@ -162,7 +162,68 @@ export default async function handler(req, res) {
       });
     }
     
-    const imageBuffer = await baseImage.png().toBuffer();
+    // 캐릭터 처리 추가
+    const overlays = [];
+    const positions = {
+      left: { x: 360, y: 960 },
+      center: { x: 720, y: 960 },
+      right: { x: 1080, y: 960 }
+    };
+    
+    console.log('캐릭터 처리 시작');
+    
+    for (const [pos, charName] of Object.entries({ left, center, right })) {
+      if (charName && charName !== 'none') {
+        try {
+          console.log(`${pos} 캐릭터 처리:`, charName);
+          const charUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/characters/${charName}.png`;
+          const charResponse = await fetch(charUrl);
+          
+          if (charResponse.ok) {
+            console.log(`${pos} 캐릭터 로드 성공`);
+            const charBuffer = await charResponse.arrayBuffer();
+            
+            let charProcessor = sharp(Buffer.from(charBuffer))
+              .resize({ height: 740, withoutEnlargement: true, fit: 'contain' });
+            
+            // 활성화 상태에 따른 어둡게 처리
+            const isActive = active === pos;
+            if (!isActive && active) {
+              console.log(`${pos} 캐릭터 어둡게 처리`);
+              charProcessor = charProcessor
+                .linear(0.5, -15)
+                .modulate({ brightness: 0.7, saturation: 0.6 });
+            }
+            
+            const processedCharBuffer = await charProcessor.png().toBuffer();
+            const charMeta = await sharp(processedCharBuffer).metadata();
+            
+            overlays.push({
+              input: processedCharBuffer,
+              left: Math.round(positions[pos].x - (charMeta.width / 2)),
+              top: Math.round(positions[pos].y - charMeta.height)
+            });
+            
+            console.log(`${pos} 캐릭터 오버레이 추가 완료`);
+          } else {
+            console.log(`${pos} 캐릭터 로드 실패:`, charResponse.status);
+          }
+        } catch (e) {
+          console.log(`${pos} 캐릭터 처리 에러:`, e.message);
+        }
+      }
+    }
+    
+    console.log('총 오버레이 개수:', overlays.length);
+    
+    // 최종 합성
+    let finalImage = baseImage;
+    if (overlays.length > 0) {
+      console.log('캐릭터 합성 시작');
+      finalImage = baseImage.composite(overlays);
+    }
+    
+    const imageBuffer = await finalImage.png().toBuffer();
     
     console.log('이미지 생성 완료, 크기:', imageBuffer.length);
     
