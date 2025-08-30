@@ -41,8 +41,8 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
-// 로직 변경 시 이 버전을 올려주세요. v1:초기, v2:키버그수정, v3:3인구도수정, v4:아웃라인버그수정
-const CACHE_VERSION = 'v5';
+// 로직 변경 시 이 버전을 올려주세요. v6: 아웃라인 생성 방식 변경
+const CACHE_VERSION = 'v6';
 
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
@@ -161,34 +161,22 @@ export default async function handler(req, res) {
 
         const charBuffer = await charResponse.arrayBuffer();
         
-        // --- 캐릭터 효과 처리 (v5 - 안정화된 아웃라인) ---
+        // --- 캐릭터 효과 처리 (v6 - tint() 방식) ---
         // 1. 원본 리사이즈
         const resizedCharBuffer = await sharp(charBuffer)
           .resize({ height: characterResizeHeight, fit: 'contain' })
           .png()
           .toBuffer();
 
-        // 2. 하얀색 아웃라인 생성 (안정적인 방식으로 변경)
+        // 2. 하얀색 아웃라인 생성 (더 안정적인 tint 방식으로 변경)
         const outlineSize = 4; // 아웃라인 두께 (px)
-        const maskBuffer = await sharp(resizedCharBuffer)
+        const whiteOutline = await sharp(resizedCharBuffer)
             .extractChannel('alpha')
-            .threshold() // 깨끗한 마스크를 위해 흑/백으로 변환
-            .dilate(outlineSize) // 마스크 확장
+            .threshold()
+            .dilate(outlineSize)
+            .tint({ r: 255, g: 255, b: 255 })
             .png()
             .toBuffer();
-        
-        const maskMeta = await sharp(maskBuffer).metadata();
-        
-        const whiteCanvas = await sharp({ create: {
-            width: maskMeta.width,
-            height: maskMeta.height,
-            channels: 4,
-            background: { r: 255, g: 255, b: 255, alpha: 1 }
-        }}).png().toBuffer();
-
-        const whiteOutline = await sharp(whiteCanvas)
-            .composite([{ input: maskBuffer, blend: 'in' }])
-            .png().toBuffer();
 
         // 3. 아웃라인 위에 원본 캐릭터 합성
         const outlinedCharBuffer = await sharp(whiteOutline)
@@ -196,7 +184,7 @@ export default async function handler(req, res) {
             .png()
             .toBuffer();
 
-        const charMeta = await sharp(outlinedCharBuffer).metadata(); // 최종 메타데이터
+        const charMeta = await sharp(outlinedCharBuffer).metadata();
 
         // 4. 최종적으로 사용할 버퍼 결정 (비활성 시 효과 적용)
         let finalCharBuffer = outlinedCharBuffer;
