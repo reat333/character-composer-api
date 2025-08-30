@@ -139,9 +139,9 @@ export default async function handler(req, res) {
     const layoutType = useLargeCharSize ? 'largeChar' : 'smallChar';
 
     const positions = {
-      left: { x: isStrictlyTwoCharLayout ? width / 4 : 360, y: height },
+      left: { x: isStrictlyTwoCharLayout ? width / 4 : 260, y: height },
       center: { x: width / 2, y: height },
-      right: { x: isStrictlyTwoCharLayout ? (width * 3) / 4 : 1080, y: height }
+      right: { x: isStrictlyTwoCharLayout ? (width * 3) / 4 : 1180, y: height }
     };
 
     const inactiveOverlays = [];
@@ -241,4 +241,5 @@ export default async function handler(req, res) {
     res.status(500).send(errorBuffer);
   }
 }
+
 
