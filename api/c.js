@@ -113,16 +113,54 @@ export default async function handler(req, res) {
     }
     
     // 기본 이미지 생성
-    console.log('새 이미지 생성 시작');
+    console.log('새 이미지 생성 시작, bg:', bg);
     
-    let baseImage = sharp({
-      create: {
-        width: 1440,
-        height: 960,
-        channels: 4,
-        background: { r: 240, g: 240, b: 240, alpha: 1 }
+    let baseImage;
+    
+    if (bg) {
+      try {
+        const bgUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/backgrounds/${bg}.png`;
+        console.log('배경 URL:', bgUrl);
+        const bgResponse = await fetch(bgUrl);
+        
+        if (bgResponse.ok) {
+          console.log('배경 이미지 로드 성공');
+          const bgBuffer = await bgResponse.arrayBuffer();
+          baseImage = sharp(Buffer.from(bgBuffer)).resize(1440, 960).png();
+        } else {
+          console.log('배경 이미지 로드 실패, 상태:', bgResponse.status);
+          throw new Error('배경 이미지 로드 실패');
+        }
+      } catch (e) {
+        console.log('배경 처리 에러:', e.message);
+        // 배경별 기본 색상
+        const bgColors = { 
+          forest: { r: 45, g: 80, b: 22 }, 
+          beach: { r: 135, g: 206, b: 235 },
+          home: { r: 200, g: 150, b: 100 }
+        };
+        const bgColor = bgColors[bg] || { r: 200, g: 200, b: 200 };
+        
+        baseImage = sharp({
+          create: {
+            width: 1440,
+            height: 960,
+            channels: 4,
+            background: { ...bgColor, alpha: 1 }
+          }
+        });
       }
-    });
+    } else {
+      console.log('배경 없음, 기본 배경 사용');
+      baseImage = sharp({
+        create: {
+          width: 1440,
+          height: 960,
+          channels: 4,
+          background: { r: 240, g: 240, b: 240, alpha: 1 }
+        }
+      });
+    }
     
     const imageBuffer = await baseImage.png().toBuffer();
     
