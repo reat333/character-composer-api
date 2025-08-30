@@ -1,7 +1,7 @@
-// api/c.js - 짧은 URL용 API
+// api/c.js - 수정된 버전 (import 문제 해결)
 const sharp = require('sharp');
 
-// 코드 매핑 테이블 - 캐릭터와 감정 분리
+// 매핑 테이블들
 const CHARACTER_CODES = {
   'a': 'girlA',
   'b': 'girlB', 
@@ -43,24 +43,9 @@ function decodeCharacter(charCode) {
   return `${character}_${emotion}`;
 }
 
-const BACKGROUND_CODES = {
-  'f': 'forest',
-  'b': 'beach', 
-  'c': 'classroom',
-  'r': 'bedroom',
-  'p': 'park'
-};
-
-const POSITION_CODES = {
-  'l': 'left',
-  'c': 'center', 
-  'r': 'right'
-};
-
 function decodeParams(paramString) {
   if (!paramString) return {};
   
-  // 패턴: left.center.right.bg.active
   const parts = paramString.split('.');
   const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts;
   
@@ -103,7 +88,7 @@ export default async function handler(req, res) {
     const width = 1440;
     const height = 960;
     
-    // 2. 배경 처리 (기존과 동일)
+    // 2. 배경 처리
     let baseImage;
     
     if (bg) {
@@ -134,7 +119,7 @@ export default async function handler(req, res) {
     
     const overlays = [];
     
-    // 3. 캐릭터 처리 (기존 로직과 동일)
+    // 3. 캐릭터 처리
     for (const [pos, charName] of Object.entries({ left, center, right })) {
       if (charName && charName !== 'none') {
         try {
