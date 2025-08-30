@@ -23,7 +23,7 @@ const BACKGROUND_CODES = {
   'b': 'beach', 
   'c': 'classroom',
   'r': 'bedroom',
-  'p': 'park'
+  'p': 'park',
   'h': 'home'
 };
 
