@@ -41,8 +41,8 @@ const HEIGHT_CROP_MAPPING = {
   smallChar: { s: 0.05, m: 0.025, l: 0 }
 };
 
-// 로직 변경 시 이 버전을 올려주세요. v6: 아웃라인 생성 방식 변경
-const CACHE_VERSION = 'v6';
+// 로직 변경 시 이 버전을 올려주세요. v7: 아웃라인 생성 방식 재수정
+const CACHE_VERSION = 'v7';
 
 /**
  * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
@@ -161,32 +161,43 @@ export default async function handler(req, res) {
 
         const charBuffer = await charResponse.arrayBuffer();
         
-        // --- 캐릭터 효과 처리 (v6 - tint() 방식) ---
+        // --- 캐릭터 효과 처리 (v7 - 캔버스 방식) ---
         // 1. 원본 리사이즈
         const resizedCharBuffer = await sharp(charBuffer)
           .resize({ height: characterResizeHeight, fit: 'contain' })
           .png()
           .toBuffer();
 
-        // 2. 하얀색 아웃라인 생성 (더 안정적인 tint 방식으로 변경)
-        const outlineSize = 4; // 아웃라인 두께 (px)
-        const whiteOutline = await sharp(resizedCharBuffer)
+        // 2. 하얀색 실루엣 생성
+        const outlineSize = 8; // 아웃라인 두께 (px) - 더 잘 보이게 2배로 늘림
+        const silhouetteBuffer = await sharp(resizedCharBuffer)
             .extractChannel('alpha')
-            .threshold()
             .dilate(outlineSize)
             .tint({ r: 255, g: 255, b: 255 })
-            .png()
-            .toBuffer();
+            .toBuffer({ resolveWithObject: true });
 
-        // 3. 아웃라인 위에 원본 캐릭터 합성
-        const outlinedCharBuffer = await sharp(whiteOutline)
-            .composite([{ input: resizedCharBuffer, gravity: 'center' }])
+        // 3. 실루엣 크기에 맞는 새 투명 캔버스 생성
+        const canvas = sharp({
+            create: {
+                width: silhouetteBuffer.info.width,
+                height: silhouetteBuffer.info.height,
+                channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            }
+        });
+
+        // 4. 캔버스에 실루엣과 원본 캐릭터를 순서대로 합성
+        const outlinedCharBuffer = await canvas
+            .composite([
+                { input: silhouetteBuffer.data, raw: silhouetteBuffer.info },
+                { input: resizedCharBuffer, gravity: 'center' }
+            ])
             .png()
             .toBuffer();
 
         const charMeta = await sharp(outlinedCharBuffer).metadata();
 
-        // 4. 최종적으로 사용할 버퍼 결정 (비활성 시 효과 적용)
+        // 5. 최종적으로 사용할 버퍼 결정 (비활성 시 효과 적용)
         let finalCharBuffer = outlinedCharBuffer;
         const isActive = active === pos;
         if (!isActive && active) {
@@ -196,7 +207,7 @@ export default async function handler(req, res) {
             .toBuffer();
         }
         
-        // 5. 일관된 메타데이터로 위치 계산
+        // 6. 일관된 메타데이터로 위치 계산
         const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
         const verticalOffset = Math.round(charMeta.height * cropRatio);
 
