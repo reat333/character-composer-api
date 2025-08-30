@@ -14,7 +14,8 @@ const EMOTION_CODES = {
   '3': 'sad', 
   '4': 'smile',
   '5': 'surprised',
-  '6': 'sleepy'
+  '6': 'sleepy',
+  'v': 'v'
 };
 
 const BACKGROUND_CODES = {
@@ -50,14 +51,9 @@ function decodeCharacter(charCode) {
   if (!charCode || charCode.length < 2) return null;
   
   const character = CHARACTER_CODES[charCode[0]];
-  const emotion = EMOTION_CODES[charCode[1]];
+  const emotion = EMOTION_CODES[charCode[1]] || EMOTION_CODES[charCode.slice(1)]; // v는 한 글자
   
   if (!character || !emotion) return null;
-  
-  // girlC의 경우 특별 처리 (파일명이 girlC_v이므로)
-  if (character === 'girlC') {
-    return 'girlC_v';
-  }
   
   return `${character}_${emotion}`;
 }
@@ -155,15 +151,20 @@ export default async function handler(req, res) {
     
     const overlays = [];
     
-    // 3. 캐릭터 처리
+    // 3. 캐릭터 처리 (디버깅 추가)
     for (const [pos, charName] of Object.entries({ left, center, right })) {
       if (charName && charName !== 'none') {
         try {
+          console.log(`${pos} 캐릭터 처리 시작:`, charName);
           const charUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/characters/${charName}.png`;
+          console.log(`${pos} URL:`, charUrl);
+          
           const charResponse = await fetch(charUrl);
+          console.log(`${pos} HTTP 상태:`, charResponse.status);
           
           if (charResponse.ok) {
             const charBuffer = await charResponse.arrayBuffer();
+            console.log(`${pos} 이미지 크기:`, charBuffer.byteLength, 'bytes');
             
             // 기본 리사이즈
             let charProcessor = sharp(Buffer.from(charBuffer))
@@ -186,6 +187,7 @@ export default async function handler(req, res) {
             // 활성화 상태에 따른 어둡게 처리
             const isActive = active === pos;
             if (!isActive && active) {
+              console.log(`${pos} 어둡게 처리 적용`);
               charProcessor = charProcessor
                 .linear(0.5, -15)
                 .modulate({ brightness: 0.7, saturation: 0.6 });
@@ -193,6 +195,7 @@ export default async function handler(req, res) {
             
             const processedCharBuffer = await charProcessor.png().toBuffer();
             const charMeta = await sharp(processedCharBuffer).metadata();
+            console.log(`${pos} 처리 완료:`, charMeta.width, 'x', charMeta.height);
             
             overlays.push({
               input: processedCharBuffer,
@@ -200,12 +203,19 @@ export default async function handler(req, res) {
               top: Math.round(positions[pos].y - charMeta.height)
             });
             
+            console.log(`${pos} 오버레이 추가 완료`);
+          } else {
+            console.log(`${pos} 캐릭터 HTTP 에러:`, charResponse.status);
           }
         } catch (e) {
-          console.log(`캐릭터 처리 에러: ${charName}`, e.message);
+          console.log(`${pos} 캐릭터 처리 에러:`, e.message);
         }
+      } else {
+        console.log(`${pos} 캐릭터 없음:`, charName);
       }
     }
+    
+    console.log('총 오버레이 개수:', overlays.length);
     
     // 4. 최종 합성
     let finalImage = baseImage;
