@@ -1,237 +1,188 @@
-// api/c.js - 기능 추가 및 정리 버전
+// api/c.js
+
 const sharp = require('sharp');
 
-// --- 매핑 테이블 ---
-const CHARACTER_CODES = {
-  'a': 'girlA',
-  'b': 'girlB',
-  'c': 'girlC'
-};
+// --- CONSTANTS ---
+const CACHE_VERSION = 'v13'; // 새로운 로직을 위한 캐시 버전 업데이트
 
-// 캐릭터별 키(height) 고정 정의
-const CHARACTER_HEIGHTS = {
-    'a': 's', // girlA
-    'b': 'm', // girlB
-    'c': 'l'  // girlC
-};
+const CHARACTER_CODES = { 'a': 'girlA', 'b': 'girlB', 'c': 'girlC' };
+const EMOTION_CODES = { '1': 'angry', '4': 'smile', '7': 'v' };
+const BACKGROUND_CODES = { 'f': 'forest', 'b': 'beach', 'h': 'home' };
+const POSITION_CODES = { 'l': 'left', 'c': 'center', 'r': 'right' };
+const CHARACTER_HEIGHTS = { 'girlA': 's', 'girlB': 'm', 'girlC': 'l' };
 
-const EMOTION_CODES = {
-  '1': 'angry',
-  '4': 'smile',
-  '7': 'v'
-};
-
-const BACKGROUND_CODES = {
-  'f': 'forest',
-  'b': 'beach',
-  'h': 'home'
-};
-
-const POSITION_CODES = {
-  'l': 'left',
-  'c': 'center',
-  'r': 'right'
-};
-
-// 키(height)에 따른 하단 잘림 비율 정의
-const HEIGHT_CROP_MAPPING = {
-  // 1인 또는 2인 구도일 때
-  largeChar: { s: 0.10, m: 0.05, l: 0 },
-  // 3인 구도일 때
-  smallChar: { s: 0.05, m: 0.025, l: 0 }
-};
-
-// 로직 변경 시 이 버전을 올려주세요. v12: 안정화 버전 (아웃라인 기능 임시 제거)
-const CACHE_VERSION = 'v12';
+// --- PARSING FUNCTIONS ---
 
 /**
- * 캐릭터 코드를 파싱하여 이름과 키 정보를 반환합니다.
- * @param {string} charCode - 예: "a1" (캐릭터a, 감정1)
- * @returns {object|null} - 예: { name: "girlA_angry", height: "l" }
+ * 캐릭터 코드('a1')를 전체 캐릭터 이름('girlA_angry')으로 변환합니다.
+ * 코드가 유효하지 않으면 null을 반환합니다.
+ * @param {string} charCode - 변환할 캐릭터 코드.
+ * @returns {string|null} 전체 캐릭터 이름 또는 null.
  */
 function decodeCharacter(charCode) {
-  if (!charCode || charCode.length < 2) return null;
+    if (!charCode || charCode.length < 2 || charCode === '*') return null;
 
-  const charKey = charCode[0];
-  const character = CHARACTER_CODES[charKey];
-  const emotion = EMOTION_CODES[charCode[1]];
-  const height = CHARACTER_HEIGHTS[charKey];
+    const character = CHARACTER_CODES[charCode[0]];
+    const emotion = EMOTION_CODES[charCode[1]];
 
-  if (!character || !emotion || !height) return null;
-
-  return {
-    name: `${character}_${emotion}`,
-    height: height,
-  };
+    if (!character || !emotion) return null;
+    return `${character}_${emotion}`;
 }
 
 /**
- * URL 파라미터 전체를 디코딩합니다.
- * @param {string} paramString - 예: "a1.b4.c7.h.c"
- * @returns {object} - 파싱된 파라미터 객체
+ * URL 쿼리에서 파라미터 문자열을 해석합니다.
+ * 예시: 'a1.*.c7.f.r'
+ * @param {string} paramString - 인코딩된 파라미터 문자열.
+ * @returns {object} 해석된 파라미터 객체.
  */
 function decodeParams(paramString) {
-  if (!paramString) return {};
+    if (!paramString) return {};
+    
+    const parts = paramString.split('.');
+    const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts;
 
-  const parts = paramString.split('.');
-  const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts.concat(Array(5 - parts.length).fill(''));
-
-  return {
-    left: decodeCharacter(leftCode),
-    center: decodeCharacter(centerCode),
-    right: decodeCharacter(rightCode),
-    bg: BACKGROUND_CODES[bgCode] || null,
-    active: POSITION_CODES[activeCode] || null
-  };
+    return {
+        left: decodeCharacter(leftCode),
+        center: decodeCharacter(centerCode),
+        right: decodeCharacter(rightCode),
+        bg: BACKGROUND_CODES[bgCode] || null,
+        active: POSITION_CODES[activeCode] || null
+    };
 }
 
+
+// --- MAIN HANDLER ---
 export default async function handler(req, res) {
-  try {
-    const { p } = req.query;
-    if (!p) {
-        return res.status(400).send('Parameter p is required.');
-    }
-
-    const { left, center, right, bg, active } = decodeParams(p);
-    const cacheKey = `${p.replace(/\./g, '_')}_${CACHE_VERSION}`;
-
-    // 1. 캐시 확인
     try {
-      const cacheUrl = `https://raw.githubusercontent.com/reat333/generated-cache/main/generated/${cacheKey}.png`;
-      const cacheCheck = await fetch(cacheUrl);
+        const { p } = req.query;
+        const { left, center, right, bg, active } = decodeParams(p);
 
-      if (cacheCheck.ok) {
-        const imageBuffer = await cacheCheck.arrayBuffer();
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=31536000');
-        res.setHeader('X-Cache-Status', 'HIT');
-        return res.send(Buffer.from(imageBuffer));
-      }
-    } catch (e) {
-      // 캐시 없음
-    }
-
-    const width = 1440;
-    const height = 960;
-
-    // 2. 배경 처리
-    let baseImage;
-    if (bg) {
+        // --- CACHE LOGIC ---
+        const cacheKey = `${CACHE_VERSION}_${p || 'default'}`;
+        const GITHUB_USER = 'reat333';
+        const CACHE_REPO = 'generated-cache';
+        
         try {
-            const bgUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/backgrounds/${bg}.png`;
-            const bgResponse = await fetch(bgUrl);
-            if (!bgResponse.ok) throw new Error('Background image not found');
-            const bgBuffer = await bgResponse.arrayBuffer();
-            baseImage = sharp(Buffer.from(bgBuffer)).resize(width, height);
+            const cacheUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/${CACHE_REPO}/main/generated/${cacheKey}.png`;
+            const cacheCheck = await fetch(cacheUrl);
+            if (cacheCheck.ok) {
+                const imageBuffer = await cacheCheck.arrayBuffer();
+                res.setHeader('Content-Type', 'image/png');
+                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+                res.setHeader('X-Cache-Status', 'HIT');
+                return res.send(Buffer.from(imageBuffer));
+            }
         } catch (e) {
-            baseImage = sharp({ create: { width, height, channels: 4, background: { r: 200, g: 200, b: 200, alpha: 1 } } });
+            // 캐시 없음, 생성 진행
         }
-    } else {
-      baseImage = sharp({ create: { width, height, channels: 4, background: { r: 240, g: 240, b: 240, alpha: 1 } } });
-    }
 
-    // 3. 구도 및 캐릭터 사이즈 결정
-    const characters = [left, center, right];
-    const presentCharsCount = characters.filter(Boolean).length;
-    
-    const isStrictlyTwoCharLayout = presentCharsCount === 2 && left && right && !center;
-    const useLargeCharSize = presentCharsCount === 1 || isStrictlyTwoCharLayout;
+        // --- IMAGE GENERATION ---
+        const width = 1440;
+        const height = 960;
+        let baseImage;
 
-    const characterResizeHeight = useLargeCharSize ? 840 : 740;
-    const layoutType = useLargeCharSize ? 'largeChar' : 'smallChar';
-
-    const positions = {
-      left: { x: isStrictlyTwoCharLayout ? width / 4 : 260, y: height },
-      center: { x: width / 2, y: height },
-      right: { x: isStrictlyTwoCharLayout ? (width * 3) / 4 : 1180, y: height }
-    };
-
-    let inactiveOverlays = [];
-    let activeOverlay = null;
-
-    // 4. 캐릭터 처리 (v12 - 아웃라인 제거, 안정화된 로직)
-    for (const [index, charData] of characters.entries()) {
-      if (!charData) continue;
-      const pos = ['left', 'center', 'right'][index];
-      try {
-        const charUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/characters/${charData.name}.png`;
-        const charResponse = await fetch(charUrl);
-        if (!charResponse.ok) continue;
-
-        const charBuffer = await charResponse.arrayBuffer();
-        
-        const isActive = active === pos;
-        let charProcessor = sharp(charBuffer)
-          .resize({ height: characterResizeHeight, fit: 'contain' });
-
-        if (!isActive && active) {
-          charProcessor = charProcessor.modulate({ brightness: 0.7, saturation: 0.6 });
+        // 배경 처리
+        if (bg) {
+            const bgUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/character-assets/main/backgrounds/${bg}.png`;
+            const bgResponse = await fetch(bgUrl);
+            if (bgResponse.ok) {
+                baseImage = sharp(await bgResponse.arrayBuffer()).resize(width, height);
+            }
+        }
+        if (!baseImage) {
+            baseImage = sharp({ create: { width, height, channels: 4, background: { r: 240, g: 240, b: 240, alpha: 1 } } });
         }
         
-        const finalCharBuffer = await charProcessor.png().toBuffer();
+        const characters = [
+            { pos: 'left', name: left },
+            { pos: 'center', name: center },
+            { pos: 'right', name: right }
+        ].filter(c => c.name);
+
+        const numCharacters = characters.length;
+        let isTwoPersonLayout = false;
+        if (numCharacters === 2 && left && right && !center) {
+            isTwoPersonLayout = true;
+        }
         
-        const charMeta = await sharp(finalCharBuffer).metadata();
-        const cropRatio = HEIGHT_CROP_MAPPING[layoutType][charData.height];
-        const verticalOffset = Math.round(charMeta.height * cropRatio);
-        
-        const overlay = {
-            input: finalCharBuffer,
-            left: Math.round(positions[pos].x - (charMeta.width / 2)),
-            top: Math.round(positions[pos].y - charMeta.height + verticalOffset)
+        const layoutConfig = {
+            charHeight: numCharacters === 3 ? 740 : 840,
+            positions: {
+                left: { x: numCharacters === 3 ? 260 : 360, y: height },
+                center: { x: 720, y: height },
+                right: { x: numCharacters === 3 ? 1180 : 1080, y: height }
+            },
+            cropMapping: {
+                largeChar: { s: 0.10, m: 0.05, l: 0.00 },
+                smallChar: { s: 0.05, m: 0.025, l: 0.00 }
+            }
         };
 
-        if (isActive) {
-            activeOverlay = overlay;
-        } else {
-            inactiveOverlays.push(overlay);
+        const overlays = [];
+        let activeOverlay = null;
+
+        for (const char of characters) {
+            const charUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/character-assets/main/characters/${char.name}.png`;
+            const charResponse = await fetch(charUrl);
+
+            if (charResponse.ok) {
+                const charBuffer = await charResponse.arrayBuffer();
+                let charProcessor = sharp(charBuffer).resize({ height: layoutConfig.charHeight, fit: 'contain' });
+                
+                const charMeta = await charProcessor.metadata();
+                const charHeightKey = CHARACTER_HEIGHTS[char.name.split('_')[0]];
+                const cropRules = (isTwoPersonLayout || numCharacters === 1) ? layoutConfig.cropMapping.largeChar : layoutConfig.cropMapping.smallChar;
+                const cropRatio = cropRules[charHeightKey] || 0;
+                const verticalOffset = Math.round(charMeta.height * cropRatio);
+
+                const overlay = {
+                    input: await charProcessor.toBuffer(),
+                    left: Math.round(layoutConfig.positions[char.pos].x - (charMeta.width / 2)),
+                    top: Math.round(layoutConfig.positions[char.pos].y - charMeta.height + verticalOffset)
+                };
+
+                const isActive = active === char.pos;
+                if (!isActive && active) {
+                    overlay.input = await sharp(overlay.input)
+                        .modulate({ brightness: 0.7, saturation: 0.6 })
+                        .toBuffer();
+                }
+
+                if (isActive) {
+                    activeOverlay = overlay;
+                } else {
+                    overlays.push(overlay);
+                }
+            }
+        }
+        
+        if (activeOverlay) {
+            overlays.push(activeOverlay);
         }
 
-      } catch (e) {
-        console.error(`Error processing character ${charData.name}:`, e);
-      }
+        // 최종 합성
+        const finalImageBuffer = await baseImage.composite(overlays).png({ quality: 90 }).toBuffer();
+
+        // --- CACHE SAVING ---
+        try {
+            const githubSaveUrl = `https://api.github.com/repos/${GITHUB_USER}/${CACHE_REPO}/contents/generated/${cacheKey}.png`;
+            await fetch(githubSaveUrl, {
+                method: 'PUT',
+                headers: { 'Authorization': `token ${process.env.GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: `Cache image: ${cacheKey}`, content: finalImageBuffer.toString('base64') })
+            });
+        } catch (cacheError) {
+            console.error('캐시 저장 실패:', cacheError.message);
+        }
+
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300');
+        res.setHeader('X-Cache-Status', 'MISS');
+        res.send(finalImageBuffer);
+
+    } catch (error) {
+        console.error('API 에러:', error);
+        res.status(500).send('Error generating image');
     }
-
-    // 5. 최종 합성 (비활성 레이어 먼저, 활성 레이어 나중에)
-    const allOverlays = [...inactiveOverlays];
-    if (activeOverlay) {
-        allOverlays.push(activeOverlay);
-    }
-
-    const finalImage = baseImage.composite(allOverlays);
-    const imageBuffer = await finalImage.png({ quality: 90 }).toBuffer();
-
-    // 6. 캐시 저장
-    try {
-      const base64Image = imageBuffer.toString('base64');
-      const githubSaveUrl = `https://api.github.com/repos/reat333/generated-cache/contents/generated/${cacheKey}.png`;
-      await fetch(githubSaveUrl, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `token ${process.env.GITHUB_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: `Cache generated image for key: ${cacheKey}`,
-          content: base64Image,
-        })
-      });
-    } catch (cacheError) {
-      console.error('Failed to save cache:', cacheError.message);
-    }
-
-    // 7. 결과 전송
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    res.setHeader('X-Cache-Status', 'MISS');
-    res.setHeader('X-Decoded-Params', JSON.stringify({left, center, right, bg, active}));
-    res.send(imageBuffer);
-
-  } catch (error) {
-    console.error('API Error:', error);
-    const errorImage = sharp({ create: { width: 1440, height: 960, channels: 4, background: { r: 255, g: 200, b: 200, alpha: 1 } } });
-    const errorBuffer = await errorImage.png().toBuffer();
-    res.setHeader('Content-Type', 'image/png');
-    res.status(500).send(errorBuffer);
-  }
 }
 
