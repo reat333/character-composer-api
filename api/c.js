@@ -1,6 +1,6 @@
 const sharp = require('sharp');
 
-const CACHE_VERSION = 'v14'; // 캐시 재생성을 위한 버전 업데이트
+const CACHE_VERSION = 'v15'; // 캐시 재생성을 위한 버전 업데이트
 
 // --- 매핑 테이블 (변경 없음) ---
 const CHARACTER_CODES = { 'a': 'girlA', 'b': 'girlB', 'c': 'girlC' };
@@ -13,7 +13,7 @@ const HEIGHT_CROP_MAPPING = {
     smallChar: { s: 0.05, m: 0.025, l: 0.00 }
 };
 
-// --- URL 파싱 함수 ( '*' 처리 기능 추가) ---
+// --- URL 파싱 함수 (변경 없음) ---
 function decodeCharacter(charCode) {
     if (!charCode || charCode.length < 2 || charCode === '*') return null;
     const character = CHARACTER_CODES[charCode[0]];
@@ -45,7 +45,7 @@ export default async function handler(req, res) {
         const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts;
         const { left, center, right, bg, active } = decodeParams(p);
 
-        // 캐시 키 생성 (오류 수정됨)
+        // 캐시 키 생성 (변경 없음)
         const cacheKey = `${CACHE_VERSION}_${leftCode}_${centerCode}_${rightCode}_${bgCode}_${activeCode}`;
 
         // 1. 캐시 확인 (변경 없음)
@@ -80,17 +80,24 @@ export default async function handler(req, res) {
             baseImage = sharp({ create: { width, height, channels: 4, background: { r: 240, g: 240, b: 240, alpha: 1 } } });
         }
 
-        // --- 3. 캐릭터 처리 (위치 계산 로직 원복) ---
-        const positions = {
+        // --- 3. 캐릭터 처리 (구도 및 위치 계산 로직 수정) ---
+        const positions3P = {
             left: { x: 260, y: height },
             center: { x: 720, y: height },
             right: { x: 1180, y: height }
         };
+        const positions1or2P = {
+            left: { x: 360, y: height },
+            center: { x: 720, y: height },
+            right: { x: 1080, y: height }
+        };
         
-        const overlays = [];
-        const numCharacters = [left, center, right].filter(Boolean).length;
+        // 캐릭터 수를 URL 원본 코드로 직접 계산하여 안정성 확보
+        const numCharacters = [leftCode, centerCode, rightCode].filter(c => c && c !== '*').length;
+
         const charSize = (numCharacters <= 2) ? 840 : 740;
         const cropRules = (numCharacters <= 2) ? HEIGHT_CROP_MAPPING.largeChar : HEIGHT_CROP_MAPPING.smallChar;
+        const positions = (numCharacters <= 2) ? positions1or2P : positions3P; // 구도에 맞는 위치 값 선택
 
         const charEntries = Object.entries({ left, center, right });
         let activeOverlay = null;
@@ -131,7 +138,7 @@ export default async function handler(req, res) {
             }
         }
         
-        // 비활성 캐릭터 어둡게 처리
+        // 비활성 캐릭터 어둡게 처리 (변경 없음)
         for (let i = 0; i < inactiveOverlays.length; i++) {
             if (active) {
                 inactiveOverlays[i].input = await sharp(inactiveOverlays[i].input)
