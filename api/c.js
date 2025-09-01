@@ -1,188 +1,173 @@
-// api/c.js
-
 const sharp = require('sharp');
 
-// --- CONSTANTS ---
-const CACHE_VERSION = 'v13'; // 새로운 로직을 위한 캐시 버전 업데이트
+const CACHE_VERSION = 'v14'; // 캐시 재생성을 위한 버전 업데이트
 
+// --- 매핑 테이블 (변경 없음) ---
 const CHARACTER_CODES = { 'a': 'girlA', 'b': 'girlB', 'c': 'girlC' };
 const EMOTION_CODES = { '1': 'angry', '4': 'smile', '7': 'v' };
 const BACKGROUND_CODES = { 'f': 'forest', 'b': 'beach', 'h': 'home' };
 const POSITION_CODES = { 'l': 'left', 'c': 'center', 'r': 'right' };
 const CHARACTER_HEIGHTS = { 'girlA': 's', 'girlB': 'm', 'girlC': 'l' };
+const HEIGHT_CROP_MAPPING = {
+    largeChar: { s: 0.10, m: 0.05, l: 0.00 },
+    smallChar: { s: 0.05, m: 0.025, l: 0.00 }
+};
 
-// --- PARSING FUNCTIONS ---
-
-/**
- * 캐릭터 코드('a1')를 전체 캐릭터 이름('girlA_angry')으로 변환합니다.
- * 코드가 유효하지 않으면 null을 반환합니다.
- * @param {string} charCode - 변환할 캐릭터 코드.
- * @returns {string|null} 전체 캐릭터 이름 또는 null.
- */
+// --- URL 파싱 함수 ( '*' 처리 기능 추가) ---
 function decodeCharacter(charCode) {
     if (!charCode || charCode.length < 2 || charCode === '*') return null;
-
     const character = CHARACTER_CODES[charCode[0]];
     const emotion = EMOTION_CODES[charCode[1]];
-
     if (!character || !emotion) return null;
     return `${character}_${emotion}`;
 }
 
-/**
- * URL 쿼리에서 파라미터 문자열을 해석합니다.
- * 예시: 'a1.*.c7.f.r'
- * @param {string} paramString - 인코딩된 파라미터 문자열.
- * @returns {object} 해석된 파라미터 객체.
- */
 function decodeParams(paramString) {
     if (!paramString) return {};
-    
     const parts = paramString.split('.');
     const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts;
-
     return {
         left: decodeCharacter(leftCode),
         center: decodeCharacter(centerCode),
         right: decodeCharacter(rightCode),
-        bg: BACKGROUND_CODES[bgCode] || null,
-        active: POSITION_CODES[activeCode] || null
+        bg: bgCode === '*' ? null : BACKGROUND_CODES[bgCode] || null,
+        active: activeCode === '*' ? null : POSITION_CODES[activeCode] || null
     };
 }
 
 
-// --- MAIN HANDLER ---
 export default async function handler(req, res) {
     try {
         const { p } = req.query;
+
+        // URL 파라미터를 각 변수로 분해
+        const parts = p ? p.split('.') : ['*', '*', '*', '*', '*'];
+        const [leftCode, centerCode, rightCode, bgCode, activeCode] = parts;
         const { left, center, right, bg, active } = decodeParams(p);
 
-        // --- CACHE LOGIC ---
-        const cacheKey = `${CACHE_VERSION}_${p || 'default'}`;
-        const GITHUB_USER = 'reat333';
-        const CACHE_REPO = 'generated-cache';
-        
+        // 캐시 키 생성 (오류 수정됨)
+        const cacheKey = `${CACHE_VERSION}_${leftCode}_${centerCode}_${rightCode}_${bgCode}_${activeCode}`;
+
+        // 1. 캐시 확인 (변경 없음)
         try {
-            const cacheUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/${CACHE_REPO}/main/generated/${cacheKey}.png`;
+            const cacheUrl = `https://raw.githubusercontent.com/reat333/generated-cache/main/generated/${cacheKey}.png`;
             const cacheCheck = await fetch(cacheUrl);
             if (cacheCheck.ok) {
                 const imageBuffer = await cacheCheck.arrayBuffer();
                 res.setHeader('Content-Type', 'image/png');
-                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+                res.setHeader('Cache-Control', 'public, max-age=31536000');
                 res.setHeader('X-Cache-Status', 'HIT');
+                res.setHeader('X-Decoded-Params', JSON.stringify({ left, center, right, bg, active }));
                 return res.send(Buffer.from(imageBuffer));
             }
-        } catch (e) {
-            // 캐시 없음, 생성 진행
-        }
+        } catch (e) { /* 캐시 없음, 새로 생성 */ }
 
-        // --- IMAGE GENERATION ---
         const width = 1440;
         const height = 960;
-        let baseImage;
 
-        // 배경 처리
+        // 2. 배경 처리 (변경 없음)
+        let baseImage;
         if (bg) {
-            const bgUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/character-assets/main/backgrounds/${bg}.png`;
+            const bgUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/backgrounds/${bg}.png`;
             const bgResponse = await fetch(bgUrl);
             if (bgResponse.ok) {
-                baseImage = sharp(await bgResponse.arrayBuffer()).resize(width, height);
+                const bgBuffer = await bgResponse.arrayBuffer();
+                baseImage = sharp(Buffer.from(bgBuffer)).resize(width, height).png();
+            } else {
+                 baseImage = sharp({ create: { width, height, channels: 4, background: { r: 200, g: 200, b: 200, alpha: 1 } } });
             }
-        }
-        if (!baseImage) {
+        } else {
             baseImage = sharp({ create: { width, height, channels: 4, background: { r: 240, g: 240, b: 240, alpha: 1 } } });
         }
-        
-        const characters = [
-            { pos: 'left', name: left },
-            { pos: 'center', name: center },
-            { pos: 'right', name: right }
-        ].filter(c => c.name);
 
-        const numCharacters = characters.length;
-        let isTwoPersonLayout = false;
-        if (numCharacters === 2 && left && right && !center) {
-            isTwoPersonLayout = true;
-        }
-        
-        const layoutConfig = {
-            charHeight: numCharacters === 3 ? 740 : 840,
-            positions: {
-                left: { x: numCharacters === 3 ? 260 : 360, y: height },
-                center: { x: 720, y: height },
-                right: { x: numCharacters === 3 ? 1180 : 1080, y: height }
-            },
-            cropMapping: {
-                largeChar: { s: 0.10, m: 0.05, l: 0.00 },
-                smallChar: { s: 0.05, m: 0.025, l: 0.00 }
-            }
+        // --- 3. 캐릭터 처리 (위치 계산 로직 원복) ---
+        const positions = {
+            left: { x: 260, y: height },
+            center: { x: 720, y: height },
+            right: { x: 1180, y: height }
         };
-
+        
         const overlays = [];
+        const numCharacters = [left, center, right].filter(Boolean).length;
+        const charSize = (numCharacters <= 2) ? 840 : 740;
+        const cropRules = (numCharacters <= 2) ? HEIGHT_CROP_MAPPING.largeChar : HEIGHT_CROP_MAPPING.smallChar;
+
+        const charEntries = Object.entries({ left, center, right });
         let activeOverlay = null;
+        const inactiveOverlays = [];
 
-        for (const char of characters) {
-            const charUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/character-assets/main/characters/${char.name}.png`;
-            const charResponse = await fetch(charUrl);
+        for (const [pos, charName] of charEntries) {
+            if (charName) {
+                try {
+                    const charUrl = `https://raw.githubusercontent.com/reat333/character-assets/main/characters/${charName}.png`;
+                    const charResponse = await fetch(charUrl);
+                    if (!charResponse.ok) continue;
 
-            if (charResponse.ok) {
-                const charBuffer = await charResponse.arrayBuffer();
-                let charProcessor = sharp(charBuffer).resize({ height: layoutConfig.charHeight, fit: 'contain' });
-                
-                const charMeta = await charProcessor.metadata();
-                const charHeightKey = CHARACTER_HEIGHTS[char.name.split('_')[0]];
-                const cropRules = (isTwoPersonLayout || numCharacters === 1) ? layoutConfig.cropMapping.largeChar : layoutConfig.cropMapping.smallChar;
-                const cropRatio = cropRules[charHeightKey] || 0;
-                const verticalOffset = Math.round(charMeta.height * cropRatio);
+                    const charBuffer = await charResponse.arrayBuffer();
+                    const resizedCharBuffer = await sharp(charBuffer).resize({ height: charSize, fit: 'contain' }).png().toBuffer();
+                    const charMeta = await sharp(resizedCharBuffer).metadata();
+                    
+                    const charKey = charName.split('_')[0];
+                    const charHeight = CHARACTER_HEIGHTS[charKey] || 'l';
+                    const cropRatio = cropRules[charHeight] || 0;
+                    const verticalOffset = Math.round(charMeta.height * cropRatio);
 
-                const overlay = {
-                    input: await charProcessor.toBuffer(),
-                    left: Math.round(layoutConfig.positions[char.pos].x - (charMeta.width / 2)),
-                    top: Math.round(layoutConfig.positions[char.pos].y - charMeta.height + verticalOffset)
-                };
+                    const { x, y } = positions[pos];
 
-                const isActive = active === char.pos;
-                if (!isActive && active) {
-                    overlay.input = await sharp(overlay.input)
-                        .modulate({ brightness: 0.7, saturation: 0.6 })
-                        .toBuffer();
-                }
+                    const overlay = {
+                        input: resizedCharBuffer,
+                        left: Math.round(x - (charMeta.width / 2)),
+                        top: Math.round(y - charMeta.height) + verticalOffset
+                    };
 
-                if (isActive) {
-                    activeOverlay = overlay;
-                } else {
-                    overlays.push(overlay);
+                    if (active === pos) {
+                        activeOverlay = overlay;
+                    } else {
+                        inactiveOverlays.push(overlay);
+                    }
+                } catch (e) {
+                    console.error(`Error processing character ${charName}:`, e.message);
                 }
             }
         }
         
-        if (activeOverlay) {
-            overlays.push(activeOverlay);
+        // 비활성 캐릭터 어둡게 처리
+        for (let i = 0; i < inactiveOverlays.length; i++) {
+            if (active) {
+                inactiveOverlays[i].input = await sharp(inactiveOverlays[i].input)
+                    .modulate({ brightness: 0.7, saturation: 0.6 })
+                    .png().toBuffer();
+            }
         }
 
-        // 최종 합성
-        const finalImageBuffer = await baseImage.composite(overlays).png({ quality: 90 }).toBuffer();
-
-        // --- CACHE SAVING ---
+        // 4. 최종 합성 (활성 캐릭터가 위로 오도록 순서 조정)
+        const finalOverlays = [...inactiveOverlays, activeOverlay].filter(Boolean);
+        const finalImage = baseImage.composite(finalOverlays);
+        const imageBuffer = await finalImage.png({ quality: 90 }).toBuffer();
+        
+        // 5. 캐시 저장 (변경 없음)
         try {
-            const githubSaveUrl = `https://api.github.com/repos/${GITHUB_USER}/${CACHE_REPO}/contents/generated/${cacheKey}.png`;
+            const base64Image = imageBuffer.toString('base64');
+            const githubSaveUrl = `https://api.github.com/repos/reat333/generated-cache/contents/generated/${cacheKey}.png`;
             await fetch(githubSaveUrl, {
                 method: 'PUT',
                 headers: { 'Authorization': `token ${process.env.GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: `Cache image: ${cacheKey}`, content: finalImageBuffer.toString('base64') })
+                body: JSON.stringify({ message: `Add cached image ${cacheKey}`, content: base64Image })
             });
-        } catch (cacheError) {
-            console.error('캐시 저장 실패:', cacheError.message);
-        }
+        } catch (cacheError) { console.log('캐시 저장 실패:', cacheError.message); }
 
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300');
+        res.setHeader('Cache-Control', 'public, max-age=300');
         res.setHeader('X-Cache-Status', 'MISS');
-        res.send(finalImageBuffer);
+        res.setHeader('X-Decoded-Params', JSON.stringify({ left, center, right, bg, active }));
+        res.send(imageBuffer);
 
     } catch (error) {
         console.error('API 에러:', error);
-        res.status(500).send('Error generating image');
+        const errorImage = sharp({ create: { width: 1440, height: 960, channels: 4, background: { r: 255, g: 200, b: 200, alpha: 1 } } });
+        const errorBuffer = await errorImage.png().toBuffer();
+        res.setHeader('Content-Type', 'image/png');
+        res.send(errorBuffer);
     }
 }
 
