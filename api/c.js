@@ -1,6 +1,6 @@
 const sharp = require('sharp');
 
-const CACHE_VERSION = 'v15'; // 캐시 재생성을 위한 버전 업데이트
+const CACHE_VERSION = 'v16'; // 캐시 재생성을 위한 버전 업데이트
 
 // --- 매핑 테이블 (변경 없음) ---
 const CHARACTER_CODES = { 'a': 'girlA', 'b': 'girlB', 'c': 'girlC' };
